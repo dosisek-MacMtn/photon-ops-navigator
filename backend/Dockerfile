@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system photonops && adduser --system --ingroup photonops photonops
+RUN addgroup --system --gid 1001 photonops && adduser --system --uid 1001 --ingroup photonops photonops
 
 COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip==26.1.2 \
@@ -18,7 +18,7 @@ COPY app ./app
 COPY entrypoint.sh ./entrypoint.sh
 
 RUN chown -R photonops:photonops /app
-USER photonops
+USER 1001
 
 EXPOSE 8000
 CMD ["sh", "/app/entrypoint.sh"]

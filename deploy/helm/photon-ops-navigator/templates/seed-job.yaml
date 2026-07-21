@@ -20,6 +20,8 @@ spec:
       serviceAccountName: {{ include "photonops.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: seed
