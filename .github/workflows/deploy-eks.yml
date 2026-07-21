@@ -1,0 +1,155 @@
+name: Deploy to EKS (Dev)
+
+# Manually dispatched only -- this does not run on every push. It builds the
+# API/web images, pushes them to ECR, and deploys the Dev Helm release to
+# macmtn-dev-cluster with Entra auth disabled by design (see
+# deploy/eks/dev-runbook.md section "Auth is intentionally disabled").
+#
+# Prerequisites this workflow assumes already exist (see the runbook for the
+# full checklist): the EKS cluster, the photonops-api/photonops-web ECR
+# repositories, GitHub OIDC trust to an AWS role bound to the "Dev"
+# environment, and the photonops-runtime secret (via the deploy/terraform/
+# eks-dev-rds module + External Secrets, or a manually created Secret).
+#
+# The EKS API endpoint's reachability from a GitHub-hosted runner is NOT
+# confirmed. If macmtn-dev-cluster's API server is private-only, change
+# `runs-on` below to a company-approved self-hosted runner inside the VPC --
+# a hosted ubuntu-latest runner cannot reach a private endpoint.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to build/deploy. Defaults to the triggering commit SHA."
+        required: false
+        default: ""
+
+permissions:
+  id-token: write # required for AWS OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_API_REPO: photonops-api
+  ECR_WEB_REPO: photonops-web
+  NAMESPACE: photonops
+  RELEASE: photonops
+
+jobs:
+  deploy:
+    name: Build, push, and deploy Dev
+    runs-on: ubuntu-latest
+    environment: Dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_SHA::12}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/$ECR_API_REPO:${{ steps.tag.outputs.tag }}" backend
+          docker push "$REGISTRY/$ECR_API_REPO:${{ steps.tag.outputs.tag }}"
+
+      - name: Build and push web image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/$ECR_WEB_REPO:${{ steps.tag.outputs.tag }}" frontend
+          docker push "$REGISTRY/$ECR_WEB_REPO:${{ steps.tag.outputs.tag }}"
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Update kubeconfig for macmtn-dev-cluster
+        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+
+      - name: Helm upgrade (initial)
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARGS=()
+          if [ -n "${{ vars.PHOTONOPS_HOST }}" ]; then
+            EXTRA_ARGS+=(--set "ingress.host=${{ vars.PHOTONOPS_HOST }}")
+          fi
+          if [ -n "${{ vars.ACM_CERTIFICATE_ARN }}" ]; then
+            EXTRA_ARGS+=(--set "ingress.certificateArn=${{ vars.ACM_CERTIFICATE_ARN }}")
+          fi
+          helm upgrade --install "$RELEASE" ./deploy/helm/photon-ops-navigator \
+            --namespace "$NAMESPACE" --create-namespace \
+            -f deploy/helm/photon-ops-navigator/values-dev.yaml \
+            --set "image.backend.repository=$REGISTRY/$ECR_API_REPO" \
+            --set "image.frontend.repository=$REGISTRY/$ECR_WEB_REPO" \
+            --set "image.backend.tag=${{ steps.tag.outputs.tag }}" \
+            --set "image.frontend.tag=${{ steps.tag.outputs.tag }}" \
+            "${EXTRA_ARGS[@]}" \
+            --wait --timeout 10m
+
+      - name: Resolve public origin and lock CORS
+        run: |
+          set -euo pipefail
+          if [ -n "${{ vars.PHOTONOPS_HOST }}" ]; then
+            HOST="${{ vars.PHOTONOPS_HOST }}"
+          else
+            echo "No PHOTONOPS_HOST set -- waiting for the ALB's auto-assigned hostname..."
+            HOST=""
+            for _ in $(seq 1 30); do
+              HOST=$(kubectl get ingress "$RELEASE" -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+              if [ -n "$HOST" ]; then break; fi
+              sleep 10
+            done
+            if [ -z "$HOST" ]; then
+              echo "::error::ALB hostname was not assigned within 5 minutes; check the AWS Load Balancer Controller and the photonops Ingress."
+              exit 1
+            fi
+          fi
+          echo "Resolved origin host: $HOST"
+
+          if [ -n "${{ vars.ACM_CERTIFICATE_ARN }}" ]; then
+            SCHEME="https"
+          else
+            SCHEME="http"
+          fi
+          ORIGIN="$SCHEME://$HOST"
+          echo "Locking CORS to $ORIGIN"
+
+          helm upgrade --install "$RELEASE" ./deploy/helm/photon-ops-navigator \
+            --namespace "$NAMESPACE" \
+            -f deploy/helm/photon-ops-navigator/values-dev.yaml \
+            --reuse-values \
+            --set "config.allowedOrigin=$ORIGIN" \
+            --wait --timeout 5m
+
+          echo "PHOTON_ORIGIN=$ORIGIN" >> "$GITHUB_ENV"
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          echo "Checking $PHOTON_ORIGIN/health"
+          curl --fail --silent --show-error "$PHOTON_ORIGIN/health"
+          echo
+          echo "Checking $PHOTON_ORIGIN/"
+          curl --fail --silent --show-error --output /dev/null "$PHOTON_ORIGIN/"
+          echo "Dev deployment healthy at $PHOTON_ORIGIN"

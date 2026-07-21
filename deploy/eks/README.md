@@ -2,6 +2,8 @@
 
 The Helm chart deploys the same tested application images used by Docker Compose. It assumes the AWS foundation already exists; it does not silently create a VPC, database, or public endpoint.
 
+For the Dev release on `macmtn-dev-cluster` (Entra auth disabled by design, host-less HTTP-only ALB), see `deploy/eks/dev-runbook.md` instead of the production steps below.
+
 ## Required AWS resources in `us-east-1`
 
 1. An EKS cluster with the AWS Load Balancer Controller and metrics-server.

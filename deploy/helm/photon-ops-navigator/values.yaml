@@ -20,6 +20,7 @@ serviceAccount:
   roleArn: ""
 
 config:
+  environment: production
   networkProvider: demo
   aiProvider: deterministic
   allowedOrigin: https://photonops.example.com

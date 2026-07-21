@@ -1,0 +1,80 @@
+# Dev overlay for the macmtn-dev-cluster EKS cluster (AWS account 307187891552,
+# us-east-1). Layered on top of values.yaml:
+#
+#   helm upgrade --install photonops ./deploy/helm/photon-ops-navigator \
+#     --namespace photonops --create-namespace \
+#     -f deploy/helm/photon-ops-navigator/values-dev.yaml \
+#     --set image.backend.tag=GIT_SHA --set image.frontend.tag=GIT_SHA
+#
+# See deploy/eks/dev-runbook.md for the full prerequisite checklist and the
+# two-phase deploy needed to lock config.allowedOrigin to the ALB's DNS name.
+#
+# Auth is intentionally disabled for this Dev release per the exec-demo
+# handoff: ENVIRONMENT=dev (not "production") plus AUTH_MODE=disabled passes
+# backend/app/config.py's fail-closed check, which only requires AUTH_MODE=entra
+# when ENVIRONMENT=="production". The Entra code path and auth.* fields below
+# are left in place, unused, ready to flip on later -- do not delete them.
+
+image:
+  backend:
+    repository: 307187891552.dkr.ecr.us-east-1.amazonaws.com/photonops-api
+  frontend:
+    repository: 307187891552.dkr.ecr.us-east-1.amazonaws.com/photonops-web
+
+replicaCount:
+  backend: 1
+  frontend: 1
+
+config:
+  environment: dev
+  networkProvider: demo
+  aiProvider: deterministic
+  # Bootstrap value only. The ALB's DNS name isn't known until after the first
+  # apply (no custom hostname yet), so this gets corrected by a second
+  # `helm upgrade --set config.allowedOrigin=http://<alb-dns-name>` once the
+  # Ingress has an address. See deploy/eks/dev-runbook.md step "Lock CORS".
+  allowedOrigin: http://localhost:3000
+
+auth:
+  mode: disabled
+  tenantId: ""
+  clientId: ""
+  apiClientId: ""
+
+runtimeSecret:
+  name: photonops-runtime
+
+# Requires the External Secrets Operator running on macmtn-dev-cluster with a
+# ClusterSecretStore named externalSecrets.secretStoreName (default
+# "aws-secrets-manager", matching the base chart). If ESO is not installed,
+# set externalSecrets.enabled=false and create the photonops-runtime Secret
+# manually instead -- see deploy/eks/dev-runbook.md.
+externalSecrets:
+  enabled: true
+  secretStoreName: aws-secrets-manager
+  remoteSecretName: photonops/dev/runtime
+
+seed:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: alb
+  # No Dev hostname yet: omitting host makes the ALB Ingress rule match any
+  # host, so the demo is reachable at the ALB's own auto-assigned DNS name.
+  # certificateArn is also empty, so the chart serves HTTP only (port 80) --
+  # see templates/ingress.yaml, which now makes the HTTPS listener and
+  # ssl-redirect conditional on a certificate being configured. Add both once
+  # a real domain + ACM cert exist.
+  host: ""
+  certificateArn: ""
+  groupName: photon-ops-navigator-dev
+
+networkPolicy:
+  enabled: true
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70

@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "photonops.labels" . | nindent 4 }}
 data:
-  ENVIRONMENT: production
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
   NETWORK_PROVIDER: {{ .Values.config.networkProvider | quote }}
   AI_PROVIDER: {{ .Values.config.aiProvider | quote }}
   AWS_REGION: {{ .Values.global.awsRegion | quote }}
