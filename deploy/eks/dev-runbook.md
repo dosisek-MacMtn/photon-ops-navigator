@@ -44,17 +44,14 @@ place anywhere in this repo.
 
 | Prerequisite | Status |
 |---|---|
-| EKS cluster | `macmtn-dev-cluster` exists, EKS Auto Mode enabled |
+| EKS cluster | **Confirmed** — `macmtn-dev-cluster` reachable via `kubectl get nodes`: 4 Ready nodes, EKS Auto Mode, `v1.35.5-eks-a3a0722` |
+| ECR repositories `photonops-api` / `photonops-web` | **Confirmed** — both exist in account `307187891552` (`aws ecr describe-repositories`) |
 | AWS Load Balancer Controller | Running, managed externally to the cluster |
 | metrics-server / HPA metrics | Not confirmed independently of Auto Mode; HPA left enabled per decision below |
-| ECR repositories `photonops-api` / `photonops-web` | Not confirmed to exist yet — create in account `307187891552` before first deploy |
 | RDS PostgreSQL 16/PostGIS | Did not exist — provisioned by `deploy/terraform/eks-dev-rds/` (section 3) |
 | ACM certificate / DNS host | None yet — Dev deliberately runs host-less/HTTP-only (section 4) |
 | GitHub OIDC trust to an AWS role | Did not exist — must be created before `deploy-eks.yml` can run (section 5) |
-| External Secrets Operator on the cluster | Not confirmed — required for the `externalSecrets.enabled: true` path in `values-dev.yaml`; verify with `kubectl get pods -n external-secrets` (or wherever it's installed) before first deploy. If absent, see the fallback in section 3. |
-
-Confirm the two unconfirmed rows before the first real deploy attempt —
-don't assume they're fine because the Terraform/Helm apply successfully.
+| External Secrets Operator on the cluster | **Confirmed absent** — `kubectl get clustersecretstore` returns "the server doesn't have a resource type". `values-dev.yaml` uses the plain-Secret fallback in section 3, not ESO. |
 
 ## 3. Provision the Dev database
 
@@ -90,22 +87,23 @@ already runs `CREATE EXTENSION IF NOT EXISTS postgis`, and the Helm chart's
 `migration-job.yaml` hook runs `alembic upgrade head` automatically on every
 install/upgrade.
 
-**Secret delivery — confirm ESO first.** `values-dev.yaml` defaults to
-`externalSecrets.enabled: true`, which requires the External Secrets
-Operator already running on `macmtn-dev-cluster` with a `ClusterSecretStore`
-named `aws-secrets-manager` (or update `externalSecrets.secretStoreName` to
-match whatever it's actually called). If ESO is not installed:
+**Secret delivery — plain Kubernetes Secret.** No External Secrets Operator
+is installed on `macmtn-dev-cluster` (confirmed above), so
+`values-dev.yaml` sets `externalSecrets.enabled: false`. After
+`terraform apply`, create the `photonops-runtime` Secret directly from the
+Secrets Manager value it wrote:
 
 ```bash
-helm upgrade --install photonops ./deploy/helm/photon-ops-navigator \
-  -f deploy/helm/photon-ops-navigator/values-dev.yaml \
-  --set externalSecrets.enabled=false ...
-
+kubectl create namespace photonops --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic photonops-runtime -n photonops \
   --from-literal=database_url="$(aws secretsmanager get-secret-value \
       --secret-id photonops/dev/runtime --query SecretString --output text \
       | python3 -c 'import json,sys; print(json.load(sys.stdin)["database_url"])')"
 ```
+
+Do this **before** `helm upgrade --install` — the migration and seed Job
+hooks (and the api Deployment) read this Secret via `envFrom` and will
+`CrashLoopBackOff`/fail if it doesn't exist yet.
 
 ## 4. Ingress: host-less, HTTP-only for now
 

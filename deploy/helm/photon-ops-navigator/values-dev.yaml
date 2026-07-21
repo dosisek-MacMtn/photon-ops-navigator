@@ -44,13 +44,14 @@ auth:
 runtimeSecret:
   name: photonops-runtime
 
-# Requires the External Secrets Operator running on macmtn-dev-cluster with a
-# ClusterSecretStore named externalSecrets.secretStoreName (default
-# "aws-secrets-manager", matching the base chart). If ESO is not installed,
-# set externalSecrets.enabled=false and create the photonops-runtime Secret
-# manually instead -- see deploy/eks/dev-runbook.md.
+# Confirmed 2026-07-21: no External Secrets Operator on macmtn-dev-cluster
+# (`kubectl get clustersecretstore` -> "the server doesn't have a resource
+# type"). Using the plain-Secret path instead: create photonops-runtime
+# manually from the Terraform-provisioned Secrets Manager secret -- see
+# deploy/eks/dev-runbook.md "Secret delivery". Revisit externalSecrets.enabled
+# if ESO is installed later.
 externalSecrets:
-  enabled: true
+  enabled: false
   secretStoreName: aws-secrets-manager
   remoteSecretName: photonops/dev/runtime
 
