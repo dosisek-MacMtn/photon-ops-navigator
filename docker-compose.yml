@@ -1,0 +1,65 @@
+name: photon-ops-navigator
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-photonops}
+      POSTGRES_USER: ${POSTGRES_USER:-photonops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-photonops-demo-local-only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photonops} -d ${POSTGRES_DB:-photonops}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - photonops-postgres:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      ENVIRONMENT: demo
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://photonops:photonops-demo-local-only@db:5432/photonops}
+      NETWORK_PROVIDER: ${NETWORK_PROVIDER:-demo}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
+      AUTH_MODE: ${AUTH_MODE:-disabled}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_API_CLIENT_ID: ${ENTRA_API_CLIENT_ID:-}
+      ENTRA_AUDIENCE: ${ENTRA_AUDIENCE:-}
+      ENTRA_REQUIRED_SCOPE: ${ENTRA_REQUIRED_SCOPE:-access_as_user}
+      AI_PROVIDER: ${AI_PROVIDER:-deterministic}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      BEDROCK_MANTLE_BASE_URL: ${BEDROCK_MANTLE_BASE_URL:-https://bedrock-mantle.us-east-1.api.aws/v1}
+      BEDROCK_MODEL: ${BEDROCK_MODEL:-openai.gpt-oss-120b}
+      BEDROCK_API_KEY: ${BEDROCK_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  web:
+    build:
+      context: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+
+volumes:
+  photonops-postgres:

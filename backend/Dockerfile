@@ -1,0 +1,24 @@
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN addgroup --system photonops && adduser --system --ingroup photonops photonops
+
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir --upgrade pip==26.1.2 \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+COPY entrypoint.sh ./entrypoint.sh
+
+RUN chown -R photonops:photonops /app
+USER photonops
+
+EXPOSE 8000
+CMD ["sh", "/app/entrypoint.sh"]

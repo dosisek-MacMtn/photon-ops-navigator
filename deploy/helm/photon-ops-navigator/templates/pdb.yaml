@@ -1,0 +1,15 @@
+{{- range $component := list "api" "web" }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "photonops.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "photonops.labels" $ | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+---
+{{ end }}

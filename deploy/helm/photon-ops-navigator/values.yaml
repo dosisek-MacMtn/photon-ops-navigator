@@ -1,0 +1,72 @@
+global:
+  awsRegion: us-east-1
+
+image:
+  pullPolicy: IfNotPresent
+  backend:
+    repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/photonops-api
+    tag: latest
+  frontend:
+    repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/photonops-web
+    tag: latest
+
+replicaCount:
+  backend: 2
+  frontend: 2
+
+serviceAccount:
+  create: true
+  name: photon-ops-navigator
+  roleArn: ""
+
+config:
+  networkProvider: demo
+  aiProvider: deterministic
+  allowedOrigin: https://photonops.example.com
+  bedrockMantleBaseUrl: https://bedrock-mantle.us-east-1.api.aws/v1
+  bedrockModel: openai.gpt-oss-120b
+
+auth:
+  mode: entra
+  tenantId: ""
+  clientId: ""
+  apiClientId: ""
+  audience: ""
+  requiredScope: access_as_user
+
+runtimeSecret:
+  name: photonops-runtime
+
+externalSecrets:
+  enabled: false
+  secretStoreName: aws-secrets-manager
+  remoteSecretName: photonops/prod/runtime
+
+seed:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: alb
+  host: photonops.example.com
+  certificateArn: ""
+  scheme: internet-facing
+  groupName: photon-ops-navigator
+  wafv2AclArn: ""
+
+networkPolicy:
+  enabled: true
+
+resources:
+  backend:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  frontend:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70

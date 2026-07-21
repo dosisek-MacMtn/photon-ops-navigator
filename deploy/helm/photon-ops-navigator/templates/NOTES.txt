@@ -1,0 +1,8 @@
+Photon-Ops Navigator was deployed to EKS.
+
+Host: https://{{ .Values.ingress.host }}
+API health: https://{{ .Values.ingress.host }}/health
+AWS region: {{ .Values.global.awsRegion }}
+AI provider: {{ .Values.config.aiProvider }}
+
+Production seed enabled: {{ .Values.seed.enabled }}
